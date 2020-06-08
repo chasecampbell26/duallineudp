@@ -32,7 +32,7 @@ while True:
         
     if wan_socket in read:
         # assuming data comes from client. TODO guard against non-client
-        (datagram, (remote_ip, remote_port)) = app_socket.recvfrom(4096)
+        (datagram, (remote_ip, remote_port)) = wan_socket.recvfrom(4096)
         print("data received on wan_socket from", remote_ip, remote_port)
         # determine if data comes from primary or secondary socket
         if datagram[0] == 1:
