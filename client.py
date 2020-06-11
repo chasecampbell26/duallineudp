@@ -26,11 +26,11 @@ primary_wan_socket.bind((PRIMARY_WAN_LOCAL_IP, WAN_LOCAL_PORT))
 
 while True:
     sockets = [app_socket, primary_wan_socket]
-    (read, write, exceptional) = select.select(sockets, [], sockets)
+    (read, dummy, exceptional) = select.select(sockets, [], sockets)
     if exceptional:
         raise OSError
 
-    # TODO condense sent/received logging
+    # TODO use selectors module
     if app_socket in read:
         (data, app_read_address) = app_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         if app_read_address != app_remote_address:
@@ -39,6 +39,10 @@ while True:
         if len(data) == MAX_DATAGRAM_LENGTH:
             raise OSError("Received max length datagram")
 
+        (dummy, write, dummy) = select.select([], [primary_wan_socket], [], 0)
+        if not(primary_wan_socket in write):
+            print("primary_wan_socket not ready for write, dropping datagram")
+            continue
         len_sent = primary_wan_socket.sendto(bytes([1]) + data, (WAN_REMOTE_IP, WAN_REMOTE_PORT))
         if len_sent < len(data) + 1:
             print("len_sent", len_sent, "data", len(data))
@@ -54,6 +58,10 @@ while True:
 
         if app_remote_address == None:
             print("app_remote_address not set yet, dropping datagram")
+            continue
+        (dummy, write, dummy) = select.select([], [app_socket], [], 0)
+        if not(app_socket in write):
+            print("app_socket not ready for write, dropping datagram")
             continue
         len_sent = app_socket.sendto(datagram[1:], app_remote_address)
         if len_sent < len(datagram) - 1:
