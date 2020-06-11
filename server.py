@@ -6,8 +6,7 @@ SERVER_LISTEN_PORT = int(sys.argv[1])
 APP_LISTEN_PORT = int(sys.argv[2])
 MAX_DATAGRAM_LENGTH = 4096
 
-primary_client_ip = None
-primary_client_port = None
+primary_client_address = None
 
 socket.setdefaulttimeout(0)
 
@@ -27,36 +26,34 @@ while True:
         (data, (app_ip, app_port)) = app_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         if len(data) == MAX_DATAGRAM_LENGTH:
             raise OSError("Received max length datagram")
-        print("data received on app_socket from", app_ip, app_port)
 
-        if primary_client_ip and primary_client_port:
-            len_sent = wan_socket.sendto(bytes([1]) + data, (primary_client_ip, primary_client_port))
+        if primary_client_address:
+            len_sent = wan_socket.sendto(bytes([1]) + data, primary_client_address)
             if len_sent < len(data) + 1:
                 print("len_sent", len_sent, "data", len(data))
                 raise OSError("len_sent not equal to data + 1")
-            print("data sent on wan_socket to primary client address", primary_client_ip, primary_client_port)
             # TODO implement sending to secondary address
         else:
-            print("primary client address not set yet, dropping data")
+            print("primary_client_address not set yet, dropping datagram")
 
     if wan_socket in read:
         # assuming data comes from client. TODO guard against non-client
-        (datagram, (remote_ip, remote_port)) = wan_socket.recvfrom(MAX_DATAGRAM_LENGTH)
+        (datagram, remote_address) = wan_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         if len(datagram) == MAX_DATAGRAM_LENGTH:
             raise OSError("Received max length datagram")
-        print("data received on wan_socket from", remote_ip, remote_port)
 
         # determine if data comes from primary or secondary socket
         if datagram[0] == 1:
             # data is from primary socket
-            primary_client_ip = remote_ip
-            primary_client_port = remote_port
+            if primary_client_address != remote_address:
+                primary_client_address = remote_address
+                print("primary client address updated to", primary_client_address)
+
             data = datagram[1:]
             len_sent = app_socket.sendto(data, ("127.0.0.1", APP_LISTEN_PORT))
             if len_sent < len(data):
                 print("len_sent", len_sent, "data", len(data))
                 raise OSError("len_sent not equal to data")
-            print("data is from primary client address, sent on app_socket")
         # elif datagram[0] == 0:
             # data is from secondary socket
             # TODO implement this
