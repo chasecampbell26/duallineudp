@@ -1,6 +1,7 @@
 import socket
 import select
 import sys
+from statsd import StatsClient
 
 SERVER_LISTEN_PORT = int(sys.argv[1])
 APP_LISTEN_PORT = int(sys.argv[2])
@@ -15,20 +16,25 @@ app_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 wan_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 wan_socket.bind(("", SERVER_LISTEN_PORT))
 
+statsd = StatsClient('localhost', 8125)
+
 while True:
     sockets = [app_socket, wan_socket]
     (read, write, exceptional) = select.select(sockets, [], sockets)
     if exceptional:
         raise OSError
 
-    # TODO condense sent/received logging
     if app_socket in read:
         (data, (app_ip, app_port)) = app_socket.recvfrom(MAX_DATAGRAM_LENGTH)
+        statsd.incr("app_socket.recv_datagram")
+        statsd.incr("app_socket.recv_bytes", len(data))
         if len(data) == MAX_DATAGRAM_LENGTH:
             raise OSError("Received max length datagram")
 
         if primary_client_address:
             len_sent = wan_socket.sendto(bytes([1]) + data, primary_client_address)
+            statsd.incr("wan_socket.sent_datagram")
+            statsd.incr("wan_socket.sent_bytes", len_sent)
             if len_sent < len(data) + 1:
                 print("len_sent", len_sent, "data", len(data))
                 raise OSError("len_sent not equal to data + 1")
@@ -39,6 +45,8 @@ while True:
     if wan_socket in read:
         # assuming data comes from client. TODO guard against non-client
         (datagram, remote_address) = wan_socket.recvfrom(MAX_DATAGRAM_LENGTH)
+        statsd.incr("wan_socket.recv_datagram")
+        statsd.incr("wan_socket.recv_bytes", len(datagram))
         if len(datagram) == MAX_DATAGRAM_LENGTH:
             raise OSError("Received max length datagram")
 
@@ -51,6 +59,8 @@ while True:
 
             data = datagram[1:]
             len_sent = app_socket.sendto(data, ("127.0.0.1", APP_LISTEN_PORT))
+            statsd.incr("app_socket.sent_datagram")
+            statsd.incr("app_socket.sent_bytes", len_sent)
             if len_sent < len(data):
                 print("len_sent", len_sent, "data", len(data))
                 raise OSError("len_sent not equal to data")
