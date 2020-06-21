@@ -89,9 +89,9 @@ def wan_to_app():
                 continue
             statsd.incr("app_socket.sent_datagram")
             statsd.incr("app_socket.sent_bytes", len_sent)
-            if len_sent < len(data):
-                print("len_sent", len_sent, "data", len(data))
-                raise OSError("len_sent not equal to data")
+            if len_sent < len(app_datagram):
+                print("len_sent", len_sent, "len(app_datagram)", len(app_datagram))
+                raise OSError("len_sent not equal to app_datagram")
         # elif datagram[0] == 0:
             # data is from secondary address
             # TODO implement this
