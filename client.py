@@ -10,7 +10,7 @@ WAN_LOCAL_PORT = int(sys.argv[5]) # shared by primary and secondary WAN sockets
 WAN_REMOTE_IP = sys.argv[6]
 WAN_REMOTE_PORT = int(sys.argv[7])
 MAX_DATAGRAM_LENGTH = 4096
-MAX_CONSECUTIVE_READS = 1000 # to prevent one stream from starving others
+MAX_CONSECUTIVE_READS = 100 # to prevent one stream from starving others
 
 # We don't know this at the start. App knows our address, and we rely on them to tell us theirs by sending us the first datagram
 app_remote_address = None
