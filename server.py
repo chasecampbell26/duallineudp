@@ -5,6 +5,7 @@ from statsd import StatsClient
 
 SERVER_LISTEN_PORT = int(sys.argv[1])
 APP_LISTEN_PORT = int(sys.argv[2])
+STATS_ENABLED = len(sys.argv) >= 4 and sys.argv[3] == 'true'
 MAX_DATAGRAM_LENGTH = 4096
 MAX_CONSECUTIVE_READS = 1000 # to prevent one stream from starving others
 
@@ -17,7 +18,11 @@ app_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 wan_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 wan_socket.bind(("", SERVER_LISTEN_PORT))
 
-statsd = StatsClient('localhost', 8125)
+class NullStatsClient:
+    def incr(self, name, value = 1):
+        pass
+
+statsd = StatsClient('localhost', 8125) if STATS_ENABLED else NullStatsClient()
 
 sel = selectors.DefaultSelector()
 sel.register(app_socket, selectors.EVENT_READ)
@@ -29,7 +34,7 @@ def app_to_wan():
         try:
             (data, (app_ip, app_port)) = app_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         except BlockingIOError:
-            return
+            break
         reads += 1
         statsd.incr("app_socket.recv_datagram")
         statsd.incr("app_socket.recv_bytes", len(data))
@@ -54,6 +59,7 @@ def app_to_wan():
             # TODO implement sending to secondary address
         else:
             print("primary_client_address not set yet, dropping datagram")
+    return reads
 
 def wan_to_app():
     global primary_client_address
@@ -63,7 +69,7 @@ def wan_to_app():
             # assuming data comes from client. TODO guard against non-client
             (datagram, remote_address) = wan_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         except BlockingIOError:
-            return
+            break
         reads += 1
         statsd.incr("wan_socket.recv_datagram")
         statsd.incr("wan_socket.recv_bytes", len(datagram))
@@ -97,12 +103,8 @@ def wan_to_app():
             # TODO implement this
         else:
             print("ignoring non-client datagram, datagram[0]==", datagram[0])
+    return reads
 
 while True:
-    ready_sockets = sel.select()
-    for selector_key, events in ready_sockets:
-        if selector_key.fileobj == app_socket:
-            app_to_wan()
-
-        if selector_key.fileobj == wan_socket:
-            wan_to_app()
+    if app_to_wan() + wan_to_app() == 0:
+        sel.select()
