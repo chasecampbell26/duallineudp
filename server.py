@@ -31,6 +31,8 @@ sel.register(wan_socket, selectors.EVENT_READ)
 def app_to_wan():
     reads = 0
     while reads < MAX_CONSECUTIVE_READS:
+        # non-blocking read to avoid holding up program if no incoming
+        app_socket.settimeout(0)
         try:
             (data, (app_ip, app_port)) = app_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         except BlockingIOError:
@@ -42,15 +44,9 @@ def app_to_wan():
             raise OSError("Received max length datagram")
 
         if primary_client_address:
-            try:
-                len_sent = wan_socket.sendto(bytes([1]) + data, primary_client_address)
-            except BlockingIOError as bioe:
-                print("BlockingIOError on wan_socket send")
-                if hasattr(bioe, "characters_written"):
-                    print("Chars sent:", bioe.characters_written)
-                    statsd.incr("wan_socket.sent_datagram")
-                    statsd.incr("wan_socket.sent_bytes", bioe.characters_written)
-                continue
+            # blocking write to avoid unnecessary datagram drops
+            wan_socket.settimeout(None)
+            len_sent = wan_socket.sendto(bytes([1]) + data, primary_client_address)
             statsd.incr("wan_socket.sent_datagram")
             statsd.incr("wan_socket.sent_bytes", len_sent)
             if len_sent < len(data) + 1:
@@ -65,6 +61,7 @@ def wan_to_app():
     global primary_client_address
     reads = 0
     while reads < MAX_CONSECUTIVE_READS:
+        wan_socket.settimeout(0)
         try:
             # assuming data comes from client. TODO guard against non-client
             (datagram, remote_address) = wan_socket.recvfrom(MAX_DATAGRAM_LENGTH)
@@ -84,15 +81,8 @@ def wan_to_app():
                 print("primary client address updated to", primary_client_address)
 
             app_datagram = datagram[1:]
-            try:
-                len_sent = app_socket.sendto(app_datagram, ("127.0.0.1", APP_LISTEN_PORT))
-            except BlockingIOError as bioe:
-                print("BlockingIOError on app_socket send")
-                if hasattr(bioe, "characters_written"):
-                    print("Chars sent:", bioe.characters_written)
-                    statsd.incr("app_socket.sent_datagram")
-                    statsd.incr("app_socket.sent_bytes", bioe.characters_written)
-                continue
+            app_socket.settimeout(None)
+            len_sent = app_socket.sendto(app_datagram, ("127.0.0.1", APP_LISTEN_PORT))
             statsd.incr("app_socket.sent_datagram")
             statsd.incr("app_socket.sent_bytes", len_sent)
             if len_sent < len(app_datagram):
