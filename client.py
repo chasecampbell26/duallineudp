@@ -1,6 +1,7 @@
 import socket
 import selectors
 import sys
+from constants import MAX_DATAGRAM_LENGTH, MAX_CONSECUTIVE_READS
 
 APP_LOCAL_IP = sys.argv[1] # should have been 127.0.0.1, but our app won't talk to it so listening on a trusted interface instead
 APP_LOCAL_PORT = int(sys.argv[2])
@@ -9,8 +10,6 @@ PRIMARY_WAN_LOCAL_IP = sys.argv[3]
 WAN_LOCAL_PORT = int(sys.argv[5]) # shared by primary and secondary WAN sockets
 WAN_REMOTE_IP = sys.argv[6]
 WAN_REMOTE_PORT = int(sys.argv[7])
-MAX_DATAGRAM_LENGTH = 4096
-MAX_CONSECUTIVE_READS = 100 # to prevent one stream from starving others
 
 # We don't know this at the start. App knows our address, and we rely on them to tell us theirs by sending us the first datagram
 app_remote_address = None

@@ -2,12 +2,11 @@ import socket
 import selectors
 import sys
 from statsd import StatsClient
+from constants import MAX_DATAGRAM_LENGTH, MAX_CONSECUTIVE_READS
 
 SERVER_LISTEN_PORT = int(sys.argv[1])
 APP_LISTEN_PORT = int(sys.argv[2])
 STATS_ENABLED = len(sys.argv) >= 4 and sys.argv[3] == 'true'
-MAX_DATAGRAM_LENGTH = 4096
-MAX_CONSECUTIVE_READS = 1000 # to prevent one stream from starving others
 
 primary_client_address = None
 
