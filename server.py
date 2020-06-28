@@ -2,13 +2,15 @@ import socket
 import selectors
 import sys
 from statsd import StatsClient
-from constants import MAX_DATAGRAM_LENGTH, MAX_CONSECUTIVE_READS
+from constants import MAX_DATAGRAM_LENGTH
 
 SERVER_LISTEN_PORT = int(sys.argv[1])
 APP_LISTEN_PORT = int(sys.argv[2])
 STATS_ENABLED = len(sys.argv) >= 4 and sys.argv[3] == 'true'
 
 primary_client_address = None
+app_to_wan_pending = None
+wan_to_app_pending = None
 
 socket.setdefaulttimeout(0)
 
@@ -27,46 +29,47 @@ sel = selectors.DefaultSelector()
 sel.register(app_socket, selectors.EVENT_READ)
 sel.register(wan_socket, selectors.EVENT_READ)
 
+# returns if program should block before next call
 def app_to_wan():
-    reads = 0
-    while reads < MAX_CONSECUTIVE_READS:
-        # non-blocking read to avoid holding up program if no incoming
-        app_socket.settimeout(0)
+    global app_to_wan_pending
+    if not(app_to_wan_pending):
         try:
             (data, (app_ip, app_port)) = app_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         except BlockingIOError:
-            break
-        reads += 1
+            return True
         statsd.incr("app_socket.recv_datagram")
         statsd.incr("app_socket.recv_bytes", len(data))
         if len(data) == MAX_DATAGRAM_LENGTH:
             raise OSError("Received max length datagram")
-
-        if primary_client_address:
-            # blocking write to avoid unnecessary datagram drops
-            wan_socket.settimeout(None)
-            len_sent = wan_socket.sendto(bytes([1]) + data, primary_client_address)
-            statsd.incr("wan_socket.sent_datagram")
-            statsd.incr("wan_socket.sent_bytes", len_sent)
-            if len_sent < len(data) + 1:
-                print("len_sent", len_sent, "data", len(data))
-                raise OSError("len_sent not equal to data + 1")
-            # TODO implement sending to secondary address
-        else:
+        if not(primary_client_address):
             print("primary_client_address not set yet, dropping datagram")
-    return reads
+            return False
+        app_to_wan_pending = bytes([1]) + data
 
+    try:
+        len_sent = wan_socket.sendto(app_to_wan_pending, primary_client_address)
+    except BlockingIOError:
+        return True
+    statsd.incr("wan_socket.sent_datagram")
+    statsd.incr("wan_socket.sent_bytes", len_sent)
+    if len_sent < len(app_to_wan_pending):
+        print("len_sent", len_sent, "app_to_wan_pending", len(app_to_wan_pending))
+        raise OSError("len_sent not equal to app_to_wan_pending")
+    app_to_wan_pending = None
+    return False
+
+    # TODO implement sending to secondary address
+
+# returns if program should block before next call
 def wan_to_app():
     global primary_client_address
-    reads = 0
-    while reads < MAX_CONSECUTIVE_READS:
-        wan_socket.settimeout(0)
+    global wan_to_app_pending
+    if not(wan_to_app_pending):
         try:
             # assuming data comes from client. TODO guard against non-client
             (datagram, remote_address) = wan_socket.recvfrom(MAX_DATAGRAM_LENGTH)
         except BlockingIOError:
-            break
-        reads += 1
+            return True
         statsd.incr("wan_socket.recv_datagram")
         statsd.incr("wan_socket.recv_bytes", len(datagram))
         if len(datagram) == MAX_DATAGRAM_LENGTH:
@@ -78,22 +81,41 @@ def wan_to_app():
             if primary_client_address != remote_address:
                 primary_client_address = remote_address
                 print("primary client address updated to", primary_client_address)
-
-            app_datagram = datagram[1:]
-            app_socket.settimeout(None)
-            len_sent = app_socket.sendto(app_datagram, ("127.0.0.1", APP_LISTEN_PORT))
-            statsd.incr("app_socket.sent_datagram")
-            statsd.incr("app_socket.sent_bytes", len_sent)
-            if len_sent < len(app_datagram):
-                print("len_sent", len_sent, "len(app_datagram)", len(app_datagram))
-                raise OSError("len_sent not equal to app_datagram")
         # elif datagram[0] == 0:
             # data is from secondary address
             # TODO implement this
         else:
             print("ignoring non-client datagram, datagram[0]==", datagram[0])
-    return reads
+            return False
+        wan_to_app_pending = datagram[1:]
+
+    try:
+        len_sent = app_socket.sendto(wan_to_app_pending, ("127.0.0.1", APP_LISTEN_PORT))
+    except BlockingIOError:
+        return True
+    statsd.incr("app_socket.sent_datagram")
+    statsd.incr("app_socket.sent_bytes", len_sent)
+    if len_sent < len(wan_to_app_pending):
+        print("len_sent", len_sent, "wan_to_app_pending", len(wan_to_app_pending))
+        raise OSError("len_sent not equal to wan_to_app_pending")
+    wan_to_app_pending = None
+    return False
 
 while True:
-    if app_to_wan() + wan_to_app() == 0:
+    # not inlining to avoid short-circuiting wan_to_app
+    app_to_wan_should_block = app_to_wan()
+    wan_to_app_should_block = wan_to_app()
+    if app_to_wan_should_block and wan_to_app_should_block:
+        app_socket_events = 0
+        wan_socket_events = 0
+        if app_to_wan_pending:
+            wan_socket_events |= selectors.EVENT_WRITE
+        else:
+            app_socket_events |= selectors.EVENT_READ
+        if wan_to_app_pending:
+            app_socket_events |= selectors.EVENT_WRITE
+        else:
+            wan_socket_events |= selectors.EVENT_READ
+        sel.modify(app_socket, app_socket_events)
+        sel.modify(wan_socket, wan_socket_events)
         sel.select()
