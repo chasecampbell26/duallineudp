@@ -29,8 +29,6 @@ app_to_primary_wan_pending = None
 primary_wan_to_app_pending = None
 
 sel = selectors.DefaultSelector()
-sel.register(app_socket, selectors.EVENT_READ)
-sel.register(primary_wan_socket, selectors.EVENT_READ)
 
 # returns True if program should block before next call
 def app_to_primary_wan():
