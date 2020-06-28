@@ -26,8 +26,6 @@ class NullStatsClient:
 statsd = StatsClient('localhost', 8125) if STATS_ENABLED else NullStatsClient()
 
 sel = selectors.DefaultSelector()
-sel.register(app_socket, selectors.EVENT_READ)
-sel.register(wan_socket, selectors.EVENT_READ)
 
 # returns if program should block before next call
 def app_to_wan():
@@ -106,6 +104,12 @@ while True:
     app_to_wan_should_block = app_to_wan()
     wan_to_app_should_block = wan_to_app()
     if app_to_wan_should_block and wan_to_app_should_block:
+        mapping = sel.get_map()
+        if app_socket in mapping:
+            sel.unregister(app_socket)
+        if wan_socket in mapping:
+            sel.unregister(wan_socket)
+
         app_socket_events = 0
         wan_socket_events = 0
         if app_to_wan_pending:
@@ -116,6 +120,9 @@ while True:
             app_socket_events |= selectors.EVENT_WRITE
         else:
             wan_socket_events |= selectors.EVENT_READ
-        sel.modify(app_socket, app_socket_events)
-        sel.modify(wan_socket, wan_socket_events)
+
+        if app_socket_events:
+            sel.register(app_socket, app_socket_events)
+        if wan_socket_events:
+            sel.register(wan_socket, wan_socket_events)
         sel.select()
